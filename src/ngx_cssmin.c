@@ -37,7 +37,6 @@
  * SOFTWARE.
  */
 
-
 #include <stdlib.h>
 #include <stdio.h>
 #include <ngx_core.h>
@@ -51,10 +50,10 @@
 
 static int theLookahead = EOF, tmp_state, state = 1, in_paren = 0;
 
-
 static int ngx_getc(ngx_buf_t *in)
 {
-    if (in->pos > in->end) {
+    if (in->pos >= in->last)
+    {
         return EOF;
     }
     u_char c = in->pos[0];
@@ -62,10 +61,11 @@ static int ngx_getc(ngx_buf_t *in)
     return c;
 }
 
-static void ngx_putc(u_char c,ngx_buf_t *out)
+static void ngx_putc(u_char c, ngx_buf_t *out)
 {
-    if (out->pos<=out->end) {
-         out->pos[0] = c;
+    if (out->pos <= out->end)
+    {
+        out->pos[0] = c;
         ++out->pos;
     }
 }
@@ -79,15 +79,18 @@ static int get(ngx_buf_t *in)
 {
     int c = theLookahead;
     theLookahead = EOF;
-    if (c == EOF) {
+    if (c == EOF)
+    {
         c = ngx_getc(in);
     }
 
-    if (c >= ' ' || c == '\n' || c == EOF) {
+    if (c >= ' ' || c == '\n' || c == EOF)
+    {
         return c;
     }
-    
-    if (c == '\r') {
+
+    if (c == '\r')
+    {
         return '\n';
     }
 
@@ -108,113 +111,136 @@ static int peek(ngx_buf_t *in)
  *machine
  */
 
-static int machine(int c,ngx_buf_t *in)
+static int machine(int c, ngx_buf_t *in)
 {
-    if (state != STATE_COMMENT) {
-        if (c == '/' && peek(in) == '*') {
+    if (state != STATE_COMMENT)
+    {
+        if (c == '/' && peek(in) == '*')
+        {
             tmp_state = state;
             state = STATE_COMMENT;
         }
     }
-    
-    switch (state) {
-        case STATE_FREE:
-            if (c == ' ' && c == '\n' ) {
-                c = 0;
 
-            } else if (c == '@') {
-                state = STATE_ATRULE;
-                break;
-
-            } else if (c > 0) {
-                state = STATE_SELECTOR;
-            }
-        case STATE_SELECTOR:
-            if (c == '{') {
-                state = STATE_BLOCK;
-
-            } else if (c == '\n') {
-                c = 0;
-
-            } else if (c == '@') {
-                state = STATE_ATRULE;
-
-            } else if (c == ' ' && peek(in) == '{') {
-                c = 0;
-            }
+    switch (state)
+    {
+    case STATE_FREE:
+        if (c == ' ' && c == '\n')
+        {
+            c = 0;
+        }
+        else if (c == '@')
+        {
+            state = STATE_ATRULE;
             break;
-        case STATE_ATRULE:
-            /* support 
+        }
+        else if (c > 0)
+        {
+            state = STATE_SELECTOR;
+        }
+    case STATE_SELECTOR:
+        if (c == '{')
+        {
+            state = STATE_BLOCK;
+        }
+        else if (c == '\n')
+        {
+            c = 0;
+        }
+        else if (c == '@')
+        {
+            state = STATE_ATRULE;
+        }
+        else if (c == ' ' && peek(in) == '{')
+        {
+            c = 0;
+        }
+        break;
+    case STATE_ATRULE:
+        /* support 
                 @import etc.
                 @font-face{
             */
-            if (c == '\n' || c == ';') {
-                c = ';';
-                state = STATE_FREE;
-
-            } else if (c == '{') {
-                state = STATE_BLOCK;
-            }
-            break;
-        case STATE_BLOCK:
-            if (c == ' ' || c == '\n' ) {
-                c = 0;
-                break;
-
-            } else if (c == '}') {
-                state = STATE_FREE;
-                break;
-
-            } else {
-                state = STATE_DECLARATION;
-            }
-        case STATE_DECLARATION:
-            //support in paren because data can uris have ;
-            if (c == '(') {
-                in_paren = 1;
-            }
-            if (in_paren == 0) {
-                
-                if ( c == ';') {
-                    state = STATE_BLOCK;
-                    //could continue peeking through white space..
-                    if (peek(in) == '}') {
-                        c = 0;
-                    }
-
-                } else if (c == '}') {
-                    //handle unterminated declaration
-                    state = STATE_FREE;
-
-                } else if ( c == '\n') {
-                  //skip new lines
-                  c = 0;
-
-                } else if (c == ' ' ) {
-                  //skip multiple spaces after each other
-                  if ( peek(in) == c ) {
-                      c = 0;
-                    }
-                }
-                
-            } else if (c == ')') {
-                in_paren = 0;
-            }
-
-            break;
-        case STATE_COMMENT:
-            if (c == '*' && peek(in) == '/') {
-                theLookahead = EOF;
-                state = tmp_state;
-            }
+        if (c == '\n' || c == ';')
+        {
+            c = ';';
+            state = STATE_FREE;
+        }
+        else if (c == '{')
+        {
+            state = STATE_BLOCK;
+        }
+        break;
+    case STATE_BLOCK:
+        if (c == ' ' || c == '\n')
+        {
             c = 0;
             break;
+        }
+        else if (c == '}')
+        {
+            state = STATE_FREE;
+            break;
+        }
+        else
+        {
+            state = STATE_DECLARATION;
+        }
+    case STATE_DECLARATION:
+        //support in paren because data can uris have ;
+        if (c == '(')
+        {
+            in_paren = 1;
+        }
+        if (in_paren == 0)
+        {
+
+            if (c == ';')
+            {
+                state = STATE_BLOCK;
+                //could continue peeking through white space..
+                if (peek(in) == '}')
+                {
+                    c = 0;
+                }
+            }
+            else if (c == '}')
+            {
+                //handle unterminated declaration
+                state = STATE_FREE;
+            }
+            else if (c == '\n')
+            {
+                //skip new lines
+                c = 0;
+            }
+            else if (c == ' ')
+            {
+                //skip multiple spaces after each other
+                if (peek(in) == c)
+                {
+                    c = 0;
+                }
+            }
+        }
+        else if (c == ')')
+        {
+            in_paren = 0;
+        }
+
+        break;
+    case STATE_COMMENT:
+        if (c == '*' && peek(in) == '/')
+        {
+            theLookahead = EOF;
+            state = tmp_state;
+        }
+        c = 0;
+        break;
     }
 
     return c;
 }
-
-
 
 /* cssmin -- minify the css
  * removes comments
@@ -222,26 +248,25 @@ static int machine(int c,ngx_buf_t *in)
  * removes last semicolon from last property
  */
 
-void
-cssmin(ngx_buf_t *in,ngx_buf_t *out)
+void cssmin(ngx_buf_t *in, ngx_buf_t *out)
 {
-    for (;;) {
+    for (;;)
+    {
         int c = get(in);
-        
-        if (c == EOF) {
+
+        if (c == EOF)
+        {
             out->end = out->pos;
             out->last = out->pos;
             out->pos = out->start;
             break;
         }
-        
-        c = machine(c,in);
 
-        if (c != 0) {
-            ngx_putc(c,out);
+        c = machine(c, in);
+
+        if (c != 0)
+        {
+            ngx_putc(c, out);
         }
     }
-
 }
-
-
