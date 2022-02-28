@@ -8,11 +8,12 @@
 #include <ngx_http.h>
 #include "ngx_jsmin.h"
 #include "ngx_cssmin.h"
-#define NGX_HTTP_IMAGE_BUFFERED 0x08
+#define NGX_HTTP_MINIFY_BUFFERED 0x08
 typedef struct
 {
-    size_t length;
-    u_int end;
+    ngx_int_t length;
+    ngx_chain_t *all_chain;
+
 } ngx_http_minify_filter_ctx_t;
 typedef struct
 {
@@ -90,19 +91,38 @@ static ngx_http_output_header_filter_pt ngx_http_next_header_filter;
 static ngx_http_output_body_filter_pt ngx_http_next_body_filter;
 static ngx_int_t ngx_http_minify_buf_in_memory(ngx_buf_t *buf, ngx_http_request_t *r, ngx_http_minify_filter_ctx_t *ctx);
 
-static ngx_int_t
-ngx_http_minify_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
+static ngx_int_t buffer_read_minify(ngx_http_request_t *r, ngx_chain_t *in, ngx_http_minify_filter_ctx_t *ctx)
 {
     ngx_buf_t *b;
     ngx_chain_t *cl;
-    ngx_http_minify_conf_t *conf;
-
-    ngx_http_minify_filter_ctx_t *ctx;
-    ctx = ngx_http_get_module_ctx(r, ngx_http_minify_filter_module);
-    if (ctx == NULL)
+    // int is_end = 0;
+    for (cl = in; cl; cl = cl->next)
     {
-        return ngx_http_next_body_filter(r, in);
+        b = cl->buf;
+        if (b == NULL)
+        {
+            continue;
+        }
+        //压缩代码
+        ngx_int_t status = ngx_http_minify_buf_in_memory(b, r, ctx);
+        if (status != NGX_OK)
+        {
+            return status;
+        }
+        if (b->last_buf)
+        {
+            return NGX_OK;
+        }
     }
+    r->connection->buffered |= NGX_HTTP_MINIFY_BUFFERED;
+    return NGX_AGAIN;
+}
+
+static ngx_int_t
+ngx_http_minify_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
+{
+    ngx_http_minify_conf_t *conf;
+    //如果不是js和css文件则不执行压缩
     const char *header_content_type = (const char *)r->headers_out.content_type.data;
     if (!(strstr(header_content_type, (const char *)ngx_http_minify_default_types[0].data) != 0 ||
           strstr(header_content_type, (const char *)ngx_http_minify_default_types[1].data) != 0 ||
@@ -111,72 +131,98 @@ ngx_http_minify_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
     {
         return ngx_http_next_body_filter(r, in);
     }
-
+    //进行代码压缩操作
+    ngx_http_minify_filter_ctx_t *ctx = ngx_http_get_module_ctx(r, ngx_http_minify_filter_module);
+    if (ctx == NULL)
+    {
+        return ngx_http_next_body_filter(r, in);
+    }
     conf = ngx_http_get_module_loc_conf(r, ngx_http_minify_filter_module);
     if (!conf->enable)
     {
         return ngx_http_next_body_filter(r, in);
     }
-    ngx_log_error(3, r->connection->log, 0, "*************************b->last_buf-----------------%d", in->buf);
+    ngx_log_error(3, r->connection->log, 0, "准备处理chain");
+    ngx_chain_add_copy(r->pool, ctx->all_chain, in);
+    ngx_log_error(3, r->connection->log, 0, "处理chain");
+
+    ngx_buf_t *b;
+    ngx_chain_t *cl;
+    // int is_end = 0;
     for (cl = in; cl; cl = cl->next)
     {
+        ngx_log_error(3, r->connection->log, 0, "循环中");
         b = cl->buf;
-        ngx_log_error(3, r->connection->log, 0, "$$$$$$$$$$$$$$$$$$$$$for last_in_chain-----------------%d", b->last_in_chain);
-        if (b->last_buf)
-        {
-            ngx_log_error(3, r->connection->log, 0, "结束");
-            ctx->end = 1;
-        }
         if (b == NULL)
         {
-            ngx_log_error(3, r->connection->log, 0, "####################b == NULL-----------------%d", b->last_buf);
+            ngx_log_error(3, r->connection->log, 0, "空的");
             continue;
         }
-        ctx->length += b->last - b->pos;
-        ngx_http_minify_buf_in_memory(b, r, ctx);
-        ngx_log_error(3, r->connection->log, 0, "---------------b->last_buf---------%d------%d", ctx->length, b->last_buf);
-        
+        if (b->last_buf)
+        {
+            ngx_log_error(3, r->connection->log, 0, "最后一个");
+            ngx_int_t status = buffer_read_minify(r, &(ctx->all_chain), ctx);
+            ngx_log_error(3, r->connection->log, 0, "压缩完了");
+            r->headers_out.content_length_n = ctx->length;
+            // ngx_http_clear_content_length(r);
+            // // ngx_log_error(3, r->connection->log, 0, "输出content_length(%d)", ctx->length);
+            // status = ngx_http_next_header_filter(r);
+            // //     r->main_filter_need_in_memory = 0;
+            // ngx_log_error(3, r->connection->log, 0, "完成(%d)", status);
+            // return ngx_http_next_body_filter(r, NULL);
+            ngx_http_clear_content_length(r);
+            status = ngx_http_next_header_filter(r);
+            ngx_log_error(3, r->connection->log, 0, "完成(%d)", status);
+            ngx_log_error(3, r->connection->log, 0, "直接跳出");
+            return ngx_http_next_body_filter(r, in);
+        }
     }
-    if (ctx->end)
-    {
-        r->headers_out.content_length_n = ctx->length;
-        ngx_log_error(3, r->connection->log, 0, "文件长度%d-----%d", r->headers_out.content_length_n, r->headers_out.content_length_n);
-        ngx_http_next_header_filter(r);
-        return ngx_http_next_body_filter(r, in);
-    }
-    ngx_log_error(3, r->connection->log, 0, "等待下次执行%d", ctx->length);
-    return NGX_AGAIN;
+    return NGX_OK;
+    // if (status == NGX_AGAIN)
+    // {
+    // return ngx_http_next_body_filter(r, in);
+    // }
+    // else
+    // {
+    //     r->headers_out.content_length_n = ctx->length;
+    //     // ngx_http_clear_content_length(r);
+    //     // // ngx_log_error(3, r->connection->log, 0, "输出content_length(%d)", ctx->length);
+    //     // status = ngx_http_next_header_filter(r);
+    //     // //     r->main_filter_need_in_memory = 0;
+    //     // ngx_log_error(3, r->connection->log, 0, "完成(%d)", status);
+    //     // return ngx_http_next_body_filter(r, NULL);
+    //     ngx_http_clear_content_length(r);
+    //     ngx_int_t status = ngx_http_next_header_filter(r);
+    //     ngx_log_error(3, r->connection->log, 0, "完成(%d)", status);
+    //     ngx_log_error(3, r->connection->log, 0, "直接跳出");
+    //     return ngx_http_next_body_filter(r, in);
+    // }
 }
 
 static ngx_int_t
 ngx_http_minify_header_filter(ngx_http_request_t *r)
 {
-
+    ngx_log_error(3, r->connection->log, 0, "进入header");
     ngx_http_minify_conf_t *conf = ngx_http_get_module_loc_conf(r, ngx_http_minify_filter_module);
-
     if (!conf->enable || (r->headers_out.status != NGX_HTTP_OK && r->headers_out.status != NGX_HTTP_FORBIDDEN && r->headers_out.status != NGX_HTTP_NOT_FOUND) || (r->headers_out.content_encoding && r->headers_out.content_encoding->value.len) || ngx_http_test_content_type(r, &conf->types) == NULL || r->header_only)
     {
         return ngx_http_next_header_filter(r);
     }
-    // ngx_log_error(3, r->connection->log, 0, "获取文本长度：%d", r->headers_out.content_length_n);
-    // ngx_http_clear_content_length(r);
-    // ngx_log_error(3, r->connection->log, 0, "映射ctx");
     ngx_http_minify_filter_ctx_t *ctx = ngx_http_get_module_ctx(r, ngx_http_minify_filter_module);
+    if (ctx)
+    {
+        ngx_http_set_ctx(r, NULL, ngx_http_minify_filter_module);
+        return ngx_http_next_header_filter(r);
+    }
 
+    ctx = ngx_pcalloc(r->pool, sizeof(ngx_http_minify_filter_ctx_t));
     if (ctx == NULL)
     {
-        ctx = ngx_pcalloc(r->pool, sizeof(ngx_http_minify_filter_ctx_t));
-        if (ctx == NULL)
-        {
-            return NGX_ERROR;
-        }
+        return NGX_ERROR;
     }
-    ctx->end = 0;
     ngx_http_set_ctx(r, ctx, ngx_http_minify_filter_module);
-    // r->headers_out.content_length_n = ctx->length;
-    // ngx_log_error(3, r->connection->log, 0, "映射ctx完成：%d", r->headers_out.content_length_n);
+    ctx->all_chain = ngx_alloc_chain_link(r->pool);
     r->main_filter_need_in_memory = 1;
-    r->allow_ranges = 0;
     return NGX_OK;
 }
 
@@ -184,13 +230,15 @@ static ngx_int_t
 ngx_http_minify_buf_in_memory(ngx_buf_t *buf, ngx_http_request_t *r, ngx_http_minify_filter_ctx_t *ctx)
 {
     ngx_buf_t *b = NULL, *dst = NULL, *min_dst = NULL;
-    ngx_int_t size;
+    ngx_int_t size = buf->end - buf->start;
 
-    size = buf->end - buf->start;
+    if (size <= 0)
+    {
+        return NGX_OK;
+    }
 
     dst = buf;
     dst->end[0] = 0;
-
     b = ngx_calloc_buf(r->pool);
     if (b == NULL)
     {
@@ -202,11 +250,9 @@ ngx_http_minify_buf_in_memory(ngx_buf_t *buf, ngx_http_request_t *r, ngx_http_mi
     b->last = b->start;
     b->end = b->last + size;
     b->temporary = 1;
-
     min_dst = b;
 
     const char *header_content_type = (const char *)r->headers_out.content_type.data;
-
     if (strstr(header_content_type, (const char *)ngx_http_minify_default_types[0].data) != 0 ||
         strstr(header_content_type, (const char *)ngx_http_minify_default_types[1].data) != 0 ||
         strstr(header_content_type, (const char *)ngx_http_minify_default_types[2].data) != 0)
@@ -221,12 +267,16 @@ ngx_http_minify_buf_in_memory(ngx_buf_t *buf, ngx_http_request_t *r, ngx_http_mi
     {
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
     }
+
     buf->start = min_dst->start;
     buf->pos = min_dst->pos;
     buf->last = min_dst->last;
     buf->end = min_dst->end;
     buf->memory = 0;
     buf->in_file = 0;
+    ctx->length += buf->last - buf->pos;
+    ngx_log_error(3, r->connection->log, 0, "---------------当前长度（%d）buf_last(%d)buf_pos(%d)", ctx->length, b->last_buf, buf->pos);
+
     return NGX_OK;
 }
 
