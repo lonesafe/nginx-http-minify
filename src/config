@@ -1,8 +1,4 @@
-# Make sure the module knows it is a submodule.
 ngx_addon_name=ngx_minify_module
-#. $ngx_addon_dir/config1
-#. $ngx_addon_dir/config2
-#. $ngx_addon_dir/config3
 
 BROTLI_MODULE_SRC_DIR="$ngx_addon_dir"
 ngx_addon_name=ngx_http_minify_filter_module
@@ -19,4 +15,4 @@ ngx_module_order=
 . auto/module
 
 have=NGX_HTTP_GZIP . auto/have
-have=NGX_HTTP_MINIFY_FILTER_MODULE . auto/have  # deprecated
+have=NGX_HTTP_MINIFY_FILTER_MODULE . auto/have
