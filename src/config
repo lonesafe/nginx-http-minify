@@ -8,6 +8,7 @@ ngx_module_incs=
 ngx_module_deps=
 ngx_module_srcs="$BROTLI_MODULE_SRC_DIR/ngx_http_minify_filter_module.c \
                  $BROTLI_MODULE_SRC_DIR/ngx_jsmin.c \
+                 $BROTLI_MODULE_SRC_DIR/ngx_minify_string.c \
                  $BROTLI_MODULE_SRC_DIR/ngx_cssmin.c"
 ngx_module_libs=
 ngx_module_order=

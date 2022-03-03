@@ -1,0 +1,1 @@
+void *minify_palloc_large(ngx_pool_t *pool, size_t size);
