@@ -20,7 +20,7 @@ typedef struct
     u_int all_end;
     u_char *body;
     ngx_buf_t *new_b;
-    char *tempChar;
+    u_char *tempChar;
 } ngx_http_minify_filter_ctx_t;
 
 static ngx_str_t ngx_http_minify_default_types[] = {
@@ -302,48 +302,55 @@ static u_char *getChar(ngx_http_request_t *r, u_char *pos, u_char *last)
  */
 static u_char *strAddstr(ngx_http_request_t *r, u_char *str1, u_char *str2, ngx_http_minify_filter_ctx_t *ctx)
 {
-    ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0, "开始拼接啦(%d)(%d)", str1, str2);
-    char *str1_ = (char *)str1;
-    ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0, "转换1(%d)", str1_);
-    char *str2_ = (char *)str2;
-    ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0, "转换2(%d)", str2_);
-    int str1_len;
-    if (str1_ == 0)
-    {
-        ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0, "唉呀str1 0");
-        str1_len = 0;
-    }
-    else
-    {
-        str1_len = strlen(str1_);
-        ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0, "str1的长度是(%d)", str1_len);
-    }
-    int str2_len;
-    if (str2_ == 0)
-    {
-        ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0, "唉呀str2 0");
-        str2_len = 0;
-    }
-    else
-    {
-        str2_len = strlen(str2_);
-        ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0, "str2的长度是(%d)", str2_len);
-    }
-    ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0, "两个char都转换完了(%d)(%d)", str1_len, str2_len);
-    if (str2_len == 0 && str1_len == 0)
-    {
-        return str1;
-    }
-    // char *str3 = ngx_pcalloc(r->pool, 1 + str1_len + str2_len);
-    char str3[1 + str1_len + str2_len];
+    // ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0, "开始拼接啦(%d)(%d)", str1, str2);
+    // char *str1_ = (char *)str1;
+    // ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0, "转换1(%d)", str1_);
+    // char *str2_ = (char *)str2;
+    // ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0, "转换2(%d)", str2_);
+    // int str1_len;
+    // if (str1_ == 0)
+    // {
+    //     ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0, "唉呀str1 0");
+    //     str1_len = 0;
+    // }
+    // else
+    // {
+    //     str1_len = strlen(str1_);
+    //     ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0, "str1的长度是(%d)", str1_len);
+    // }
+    // int str2_len;
+    // if (str2_ == 0)
+    // {
+    //     ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0, "唉呀str2 0");
+    //     str2_len = 0;
+    // }
+    // else
+    // {
+    //     str2_len = strlen(str2_);
+    //     ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0, "str2的长度是(%d)", str2_len);
+    // }
+    // ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0, "两个char都转换完了(%d)(%d)", str1_len, str2_len);
+    // if (str2_len == 0 && str1_len == 0)
+    // {
+    //     return str1;
+    // }
+    int str1_len, str2_len;
+    /* Find the current size of tokens1 and tokens 2 */
+    for (str1_len = 0; (str1[str1_len] != '\0'); str1_len++)
+        ;
+    for (str2_len = 0; str2[str2_len] != '\0'; str2_len++)
+        ;
+    u_char *str3 = ngx_pcalloc(r->pool, 1 + str1_len + str2_len);
+    // char str3[1 + str1_len + str2_len];
     ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0, "创建str3(%d)(%d)", ngx_strlen(str3), 1 + str1_len + str2_len);
-    strcpy(str3, str1_);
+    ngx_memcpy(str3, str1, str1_len * sizeof(u_char *));
     ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0, "第一个拷贝完了");
-    strcat(str3, str2_);
+    ngx_memcpy(str3 + str1_len, str2, str2_len * sizeof(u_char *));
     // strcat(str1_, str2_);
-    ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0, "拼接成功啦(%d)(%d)", str1_, str2_);
-    ctx->tempChar = (char *)str3;
-    return (u_char *)ctx->tempChar;
+    ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0, "拼接成功啦(%d)(%d)", str1_len, str2_len);
+    str3[str1_len + str2_len] = '\0';
+    ctx->tempChar = str3;
+    return ctx->tempChar;
 }
 
 static ngx_int_t
