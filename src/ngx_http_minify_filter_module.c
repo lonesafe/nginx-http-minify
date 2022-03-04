@@ -23,6 +23,7 @@ typedef struct
     ngx_buf_t *new_b;
     u_char *tempChar;
     u_int content_size;
+    mystring *content_string;
 } ngx_http_minify_filter_ctx_t;
 
 static ngx_str_t ngx_http_minify_default_types[] = {
@@ -54,7 +55,7 @@ static ngx_int_t ngx_http_minify_filter_init(ngx_conf_t *cf);
 static void *ngx_http_minify_create_conf(ngx_conf_t *cf);
 static char *ngx_http_minify_merge_conf(ngx_conf_t *cf, void *parent, void *child);
 static ngx_int_t ngx_http_minify_buf_in_memory(ngx_buf_t *buf, ngx_http_request_t *r, ngx_http_minify_filter_ctx_t *ctx);
-static u_char *strAddstr(ngx_http_request_t *r, u_char *str1, u_char *str2, ngx_http_minify_filter_ctx_t *ctx);
+// static u_char *strAddstr(ngx_http_request_t *r, u_char *str1, u_char *str2, ngx_http_minify_filter_ctx_t *ctx);
 static u_char *getChar(ngx_http_request_t *r, u_char *pos, u_char *last);
 static ngx_http_module_t ngx_http_minify_filter_module_ctx = {
     NULL,                        /* preconfiguration */
@@ -118,7 +119,6 @@ ngx_http_minify_header_filter(ngx_http_request_t *r)
         return NGX_ERROR;
     }
     ngx_http_set_ctx(r, ctx, ngx_http_minify_filter_module);
-
     ngx_http_clear_content_length(r);
     return ngx_http_next_header_filter(r);
 }
@@ -165,7 +165,16 @@ ngx_http_minify_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
         ctx->new_b = cl->buf;
         u_char *now_buffer = getChar(r, ctx->new_b->pos, ctx->new_b->last);
         ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0, "获取到newbuffer啦");
-        ctx->body = strAddstr(r, ctx->body, now_buffer, ctx);
+        if (ctx->content_string == NULL)
+        {
+            ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0, "初始化string");
+            initwithstring(r->pool, ctx->content_string, now_buffer);
+        }
+        else
+        {
+            backaddstring(ctx->content_string, now_buffer);
+        }
+
         ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0, "组合body啦");
         // b = cl->buf;
         // if (cl->buf->in_file)
@@ -246,13 +255,13 @@ ngx_http_minify_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
     if (ctx->all_end)
     {
         ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0, "最后重新组合ngx_buf_t(%d)", ctx->content_size);
-        ngx_buf_t *out = ngx_create_temp_buf(r->pool, ctx->content_size);
+        ngx_buf_t *out = ngx_create_temp_buf(r->pool, ctx->content_string->reallength);
         ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0, "重新指向pos（%s）", ctx->body);
-        out->pos = ctx->body;
+        out->pos = ctx->content_string->p;
         ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0, "重新指向end");
         out->end = out->pos;
         ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0, "重新组合last(%d)", ngx_strlen(ctx->body));
-        out->last = out->pos + ngx_strlen(ctx->body);
+        out->last = out->pos + ctx->content_string->reallength;
         ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0, "重新组合in->buf(%d)", ngx_strlen(out));
         in->buf = out;
         in->next = NULL;
@@ -287,7 +296,7 @@ static u_char *getChar(ngx_http_request_t *r, u_char *pos, u_char *last)
         ++a;
         i++;
     }
-    u_char *e = (u_char *)minify_palloc_large(r->pool, i + 1);
+    u_char *e = (u_char *)minify_pcalloc(r->pool, i + 1);
     // ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0, "内存分配啦（%d）", ngx_strlen(e));
     for (i = 0;;)
     {
@@ -315,88 +324,89 @@ static u_char *getChar(ngx_http_request_t *r, u_char *pos, u_char *last)
  *  拼接两个char
  *
  */
-static u_char *strAddstr(ngx_http_request_t *r, u_char *str1, u_char *str2, ngx_http_minify_filter_ctx_t *ctx)
-{
-    // ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0, "开始拼接啦(%d)(%d)", str1, str2);
-    // char *str1_ = (char *)str1;
-    // ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0, "转换1(%d)", str1_);
-    // char *str2_ = (char *)str2;
-    // ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0, "转换2(%d)", str2_);
-    // int str1_len;
-    // if (str1_ == 0)
-    // {
-    //     ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0, "唉呀str1 0");
-    //     str1_len = 0;
-    // }
-    // else
-    // {
-    //     str1_len = strlen(str1_);
-    //     ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0, "str1的长度是(%d)", str1_len);
-    // }
-    // int str2_len;
-    // if (str2_ == 0)
-    // {
-    //     ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0, "唉呀str2 0");
-    //     str2_len = 0;
-    // }
-    // else
-    // {
-    //     str2_len = strlen(str2_);
-    //     ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0, "str2的长度是(%d)", str2_len);
-    // }
-    // ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0, "两个char都转换完了(%d)(%d)", str1_len, str2_len);
-    // if (str2_len == 0 && str1_len == 0)
-    // {
-    //     return str1;
-    // }
-    int str1_len, str2_len;
-    // ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0, "获取长度");
+// static u_char *strAddstr(ngx_http_request_t *r, u_char *str1, u_char *str2, ngx_http_minify_filter_ctx_t *ctx)
+// {
+//     // ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0, "开始拼接啦(%d)(%d)", str1, str2);
+//     // char *str1_ = (char *)str1;
+//     // ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0, "转换1(%d)", str1_);
+//     // char *str2_ = (char *)str2;
+//     // ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0, "转换2(%d)", str2_);
+//     // int str1_len;
+//     // if (str1_ == 0)
+//     // {
+//     //     ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0, "唉呀str1 0");
+//     //     str1_len = 0;
+//     // }
+//     // else
+//     // {
+//     //     str1_len = strlen(str1_);
+//     //     ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0, "str1的长度是(%d)", str1_len);
+//     // }
+//     // int str2_len;
+//     // if (str2_ == 0)
+//     // {
+//     //     ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0, "唉呀str2 0");
+//     //     str2_len = 0;
+//     // }
+//     // else
+//     // {
+//     //     str2_len = strlen(str2_);
+//     //     ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0, "str2的长度是(%d)", str2_len);
+//     // }
+//     // ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0, "两个char都转换完了(%d)(%d)", str1_len, str2_len);
+//     // if (str2_len == 0 && str1_len == 0)
+//     // {
+//     //     return str1;
+//     // }
+//     int str1_len, str2_len;
+//     // ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0, "获取长度");
 
-    /* Find the current size of tokens1 and tokens 2 */
-    if (NULL != str2)
-    {
-        // for (str2_len = 0; str2[str2_len] != '\0'; str2_len++)
-        //     ;
-        str2_len = ngx_strlen(str2);
-    }
-    else
-    {
-        return str1;
-    }
+//     /* Find the current size of tokens1 and tokens 2 */
+//     if (NULL != str2)
+//     {
+//         // for (str2_len = 0; str2[str2_len] != '\0'; str2_len++)
+//         //     ;
+//         str2_len = ngx_strlen(str2);
+//     }
+//     else
+//     {
+//         return str1;
+//     }
 
-    // ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0, "获取完成");
-    if (NULL != str1)
-    {
-        // for (str1_len = 0; (str1[str1_len] != '\0'); str1_len++)
-        //     ;
-        str1_len = ngx_strlen(str1);
-    }
-    else
-    {
-        str1_len = 0;
-    }
+//     // ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0, "获取完成");
+//     if (NULL != str1)
+//     {
+//         // for (str1_len = 0; (str1[str1_len] != '\0'); str1_len++)
+//         //     ;
+//         str1_len = ngx_strlen(str1);
+//     }
+//     else
+//     {
+//         str1_len = 0;
+//     }
 
-    char *str3 = minify_palloc_large(r->pool, 1 + str1_len + str2_len);
-    ctx->content_size = ctx->content_size + 1 + str1_len + str2_len;
-    ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0, "创建str3(%d)(%d)(%d)(%d)", str1_len, str2_len, ngx_strlen(str2), ngx_strlen(str3));
-        ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0, "创建str3(%s)", str3);
+//     u_char *str3 = (u_char *)minify_pcalloc(r->pool, 1 + str1_len + str2_len);
+//     ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0, "创建str3(%d)(%d)", str1_len, ctx->content_size);
+//     ctx->content_size = ctx->content_size + 1 + str1_len + str2_len;
+//     ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0, "创建str3(%s)", str3);
 
-    if (str1_len > 0)
-    {
-        ngx_memcpy(str3, str1, str1_len * sizeof(u_char *));
-    }
+//     if (str1_len > 0)
+//     {
+//         ngx_memcpy(str3, str1, str1_len * sizeof(u_char *));
+//     }
 
-    // ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0, "第一个拷贝完了");
-    if (str2_len > 0)
-    {
-        ngx_memcpy(str3 + str1_len, str2, str2_len * sizeof(u_char *));
-    }
-    // strcat(str1_, str2_);
-    ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0, "拼接成功啦");
-    str3[str1_len + str2_len] = '\0';
-    ctx->tempChar = (u_char *)str3;
-    return ctx->tempChar;
-}
+//     ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0, "第一个拷贝完了");
+//     if (str2_len > 0)
+//     {
+//         ngx_memcpy(str3 + str1_len, str2, str2_len * sizeof(u_char *));
+//     }
+//     // strcat(str1_, str2_);
+//     ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0, "拼接成功啦");
+//     str3[str1_len + str2_len] = '\0';
+//     ctx->tempChar = str3;
+//     ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0, "赋值成功啦(%s)", ctx->tempChar);
+//     return ctx->tempChar;
+// }
 static ngx_int_t
 ngx_http_minify_buf_in_memory(ngx_buf_t *buf, ngx_http_request_t *r, ngx_http_minify_filter_ctx_t *ctx)
 {
